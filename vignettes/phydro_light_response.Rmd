@@ -97,3 +97,108 @@ tibble(ppfd = seq(0,1200, length.out=50)) %>%
   
 
 ```
+
+
+### Subdaily response
+
+```{r}
+dat_acc = tibble(ppfd = ppfd_max) %>% mutate(dat = purrr::map(.x=ppfd, .f = ~rphydro_analytical(tc, tc, .x, netrad, vpd, co2, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options))) %>% unnest_wider(dat)
+
+
+dat_subd = tibble(t = seq(0,pi,length.out=50)) %>% mutate(ppfd = ppfd_max*sin(t)) %>% mutate(dat = purrr::map(.x=ppfd, .f = ~rphydro_instantaneous_analytical(dat_acc$vcmax25, dat_acc$jmax25, tc, tc, .x, netrad, vpd, co2, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options))) %>% unnest_wider(dat)
+
+dat_subd %>% pivot_longer(-ppfd) %>%  ggplot(aes(y=value, x=ppfd)) + 
+  geom_line(col="aquamarine4") + 
+  geom_vline(xintercept = 0, col="pink") + 
+  theme_classic() +
+  theme(strip.background = element_rect(color = "white", size = 1))+
+  facet_wrap(~name, scales = "free")
+
+df.m1.subd <- dat_subd %>% pivot_longer(-t)
+
+df.m1.subd_mean = df.m1.subd %>% group_by(name) %>% summarize(value_mean=mean(value))
+
+df.m1.subd %>% 
+  left_join(df.m1.subd_mean) %>% 
+  ggplot() + 
+  geom_line(aes(y=value, x=t), col="aquamarine4") + 
+  geom_hline(aes(yintercept=value_mean), col="pink")+
+  theme_classic() +
+  theme(strip.background = element_rect(color = "white", size = 1))+
+  facet_wrap(~name, scales = "free")
+
+
+```
+
+
+### Daily scaling options
+
+We test several methods for scaling the acclimating model response from daily-max ppfd to daily-mean ppfd.
+
+```{r}
+ppfd_max = ppfd_max
+ppfd_daytime = mean(dat_subd$ppfd)
+ppfd_24hr = ppfd_daytime/2
+```
+
+```{r}
+## Actual daily mean
+dat_inst_actual = df.m1.subd_mean %>% 
+  pivot_wider(names_from=name, values_from=value_mean) %>% 
+  mutate(across(
+    everything(),
+    function(x){x/2}
+  )) %>% 
+  mutate(type = "actual")
+
+## Inst model with linear scaling
+dat_inst_linear = dat_acc %>% 
+  mutate(across(
+    everything(),
+    function(x){x*ppfd_24hr/ppfd_max}
+  )) %>% 
+  mutate(type="linear")
+
+# Inst model with daytime ppfd
+dat_inst_phydro_day = rphydro_instantaneous_analytical(dat_acc$vcmax25, dat_acc$jmax25, tc, tc, ppfd_daytime, netrad, vpd, co2, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options) %>%
+  as.data.frame() %>% 
+  mutate(across(
+    everything(),
+    function(x){x/2}
+  )) %>% 
+  mutate(type="inst_daytime")
+
+# Inst model with daytime ppfd and acclimated dpsi
+dat_inst_phydro_day_dpsi = rphydro_instantaneous_analytical_given_dpsi(acc$dpsi, dat_acc$vcmax25, dat_acc$jmax25, tc, tc, ppfd_daytime, netrad, vpd, co2, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options) %>%
+  as.data.frame() %>% 
+  mutate(across(
+    everything(),
+    function(x){x/2}
+  )) %>% 
+  mutate(type="inst_daytime_accdpsi")
+
+# Inst model with 24hr ppfd
+dat_inst_phydro_24hr = rphydro_instantaneous_analytical(dat_acc$vcmax25, dat_acc$jmax25, tc, tc, ppfd_24hr, netrad, vpd, co2, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options) %>%
+  as.data.frame() %>% 
+  mutate(type="inst_24hr")
+
+
+```
+
+### Compare daily predictions
+
+```{r fig.width=9, fig.height=9}
+dplyr::bind_rows(
+  dat_inst_actual,
+  dat_inst_linear,
+  dat_inst_phydro_day,
+  dat_inst_phydro_day_dpsi,
+  dat_inst_phydro_24hr
+) %>% 
+  pivot_longer(-type) %>% 
+  ggplot(aes(y=type, x=value, fill=type))+
+    geom_col(position="dodge")+
+    facet_wrap(~name, scales="free_x")
+    
+```
+

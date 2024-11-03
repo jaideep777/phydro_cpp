@@ -1,0 +1,207 @@
+---
+title: "Phydro CO2 response"
+author: "Jaideep Joshi"
+date: "2024-02-17"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(rphydro)
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+```
+
+```{r}
+kphio = 0.0593;        # quantum yield efficiency
+ppfd = 300;          # umol/m2/s
+ppfd_max = 1200;
+vpd  = 600;         # Pa
+co2  = 368;          # ppm
+elv  = 0;            # m.a.s.l.
+fapar = 1-exp(-0.5*5.0);         # fraction
+rdark = 0.015;
+tc = 25;
+vwind = 3;
+netrad = ppfd/2
+psi_soil = -0.05
+pa = calc_patm(elv)
+
+par_cost = list(alpha=0.1, gamma=0.5);
+par_plant = list(conductivity=5e-17, psi50=-2, b=1);
+options = list(gs_method = "GS_IGF", 
+               et_method = "ET_DIFFUSION",
+               ftemp_vj_method = "FV_kumarathunge19",
+               ftemp_rd_method = "FR_heskel16",
+               ftemp_br_method = "FB_atkin15",
+               scale_alpha = F)
+```
+
+## Acclimating response
+
+```{r}
+dat = tibble(co2 = seq(200,1200,length.out=50)) %>% mutate(dat = purrr::map(.x=co2, .f = ~rphydro_analytical(tc, tc, ppfd_max, netrad, vpd, .x, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options))) %>% unnest_wider(dat)
+```
+
+```{r}
+df.m <- dat %>% melt("co2")
+
+ggplot(df.m, aes(y=value, x=co2)) + 
+  geom_line(col="aquamarine4") + 
+  theme_classic() +
+  theme(strip.background = element_rect(color = "white", size = 1))+
+  facet_wrap(~variable, scales = "free")
+
+dat_base = dat %>% filter(abs(co2-368) == min(abs(co2-368)) )
+
+dat %>% 
+  filter(co2 > 300) %>% 
+  mutate(beta_a = log(a/dat_base$a)/log(co2/dat_base$co2),
+         beta_vcmax = log(vcmax25/dat_base$vcmax25)/log(co2/dat_base$co2)
+         ) %>% 
+  ggplot(aes(x=co2))+
+  geom_line(aes(y=beta_a), col="green3")+
+  geom_line(aes(y=beta_vcmax), col="orange2")
+```
+
+## Instantaneous response by linear scaling
+
+```{r}
+
+dat_inst_lin = tibble(co2 = seq(200,1200,length.out=50)) %>% left_join(dat) %>% mutate(a=a*ppfd/ppfd_max, e=e*ppfd/ppfd_max)
+
+df.m1.lin <- dat_inst_lin %>% melt("co2")
+
+ggplot(df.m1.lin, aes(y=value, x=co2)) +
+  geom_line(col="aquamarine4") +
+  theme_classic() +
+  theme(strip.background = element_rect(color = "white", size = 1))+
+  facet_wrap(~variable, scales = "free")
+
+dat_base1.lin = dat_inst_lin %>% filter(abs(co2-368) == min(abs(co2-368)) )
+
+dat_inst_lin %>% 
+  filter(co2 > 300) %>% 
+  mutate(beta_a = log(a/dat_base1.lin$a)/log(co2/dat_base1.lin$co2),
+         beta_vcmax = log(vcmax25/dat_base1.lin$vcmax25)/log(co2/dat_base1.lin$co2)
+         ) %>% 
+  ggplot(aes(x=co2))+
+  geom_line(aes(y=beta_a), col="green3")+
+  geom_line(aes(y=beta_vcmax), col="orange2")
+
+```
+
+
+## Instantaneous response with acclimated dpsi
+
+```{r}
+acc = dat %>% select(co2, vcmax25, jmax25, dpsi_acc=dpsi)
+
+dat_inst_dpsi = tibble(co2 = seq(200,1200,length.out=50)) %>% left_join(acc) %>% mutate(dat = purrr::pmap(.l=list(co2, vcmax25, jmax25, dpsi_acc), .f = ~rphydro_instantaneous_analytical_given_dpsi(..4, ..2, ..3, tc, tc, ppfd*2, netrad, vpd, ..1, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options))) %>% select(-vcmax25, -jmax25) %>% unnest_wider(dat) %>% mutate(a=a/2)
+
+df.m1.dpsi <- dat_inst_dpsi %>% melt("co2")
+
+ggplot(df.m1.dpsi, aes(y=value, x=co2)) +
+  geom_line(col="aquamarine4") +
+  theme_classic() +
+  theme(strip.background = element_rect(color = "white", size = 1))+
+  facet_wrap(~variable, scales = "free")
+
+dat_base1.dpsi = dat_inst_dpsi %>% filter(abs(co2-368) == min(abs(co2-368)) )
+
+dat_inst_dpsi %>% 
+  filter(co2 > 300) %>% 
+  mutate(beta_a = log(a/dat_base1.dpsi$a)/log(co2/dat_base1.dpsi$co2),
+         beta_vcmax = log(vcmax25/dat_base1.dpsi$vcmax25)/log(co2/dat_base1.dpsi$co2)
+         ) %>% 
+  ggplot(aes(x=co2))+
+  geom_line(aes(y=beta_a), col="green3")+
+  geom_line(aes(y=beta_vcmax), col="orange2")
+
+```
+
+
+## Instantaneous response with optimized dpsi
+
+```{r}
+
+dat_inst = tibble(co2 = seq(200,1200,length.out=50)) %>% left_join(acc) %>% mutate(dat = purrr::pmap(.l=list(co2, vcmax25, jmax25), .f = ~rphydro_instantaneous_analytical(..2, ..3, tc, tc, ppfd*2, netrad, vpd, ..1, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options))) %>% select(-vcmax25, -jmax25) %>% unnest_wider(dat) %>% mutate(a=a/2)
+
+df.m1 <- dat_inst %>% melt("co2")
+
+ggplot(df.m1, aes(y=value, x=co2)) +
+  geom_line(col="aquamarine4") +
+  theme_classic() +
+  theme(strip.background = element_rect(color = "white", size = 1))+
+  facet_wrap(~variable, scales = "free")
+
+dat_base1 = dat_inst %>% filter(abs(co2-368) == min(abs(co2-368)) )
+
+dat_inst %>% 
+  filter(co2 > 300) %>% 
+  mutate(beta_a = log(a/dat_base1$a)/log(co2/dat_base1$co2),
+         beta_vcmax = log(vcmax25/dat_base1$vcmax25)/log(co2/dat_base1$co2)
+         ) %>% 
+  ggplot(aes(x=co2))+
+  geom_line(aes(y=beta_a), col="green3")+
+  geom_line(aes(y=beta_vcmax), col="orange2")
+
+```
+
+
+
+
+## Light-saturated instantaneous response with optimized dpsi
+
+```{r}
+
+dat_inst_ls = tibble(co2 = seq(200,1200,length.out=50)) %>% left_join(acc) %>% mutate(dat = purrr::pmap(.l=list(co2, vcmax25, jmax25), .f = ~rphydro_instantaneous_analytical(..2, ..3, tc, tc, 1500, netrad, vpd, ..1, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options))) %>% select(-vcmax25, -jmax25) %>% unnest_wider(dat) %>% mutate(a=a/2)
+
+df.m1.ls <- dat_inst_ls %>% melt("co2")
+
+ggplot(df.m1.ls, aes(y=value, x=co2)) +
+  geom_line(col="aquamarine4") +
+  theme_classic() +
+  theme(strip.background = element_rect(color = "white", size = 1))+
+  facet_wrap(~variable, scales = "free")
+
+dat_base1_ls = dat_inst_ls %>% filter(abs(co2-368) == min(abs(co2-368)) )
+
+dat_inst_ls %>% 
+  filter(co2 > 300) %>% 
+  mutate(beta_a = log(a/dat_base1_ls$a)/log(co2/dat_base1_ls$co2),
+         beta_vcmax = log(vcmax25/dat_base1_ls$vcmax25)/log(co2/dat_base1_ls$co2)
+         ) %>% 
+  ggplot(aes(x=co2))+
+  geom_line(aes(y=beta_a), col="green3")+
+  geom_line(aes(y=beta_vcmax), col="orange2")
+
+```
+
+
+
+### Compare a in acclim vs inst responses
+
+```{r}
+dat %>% 
+  select(co2, a) %>% 
+  mutate(a = a/4*1.18) %>% 
+  left_join(
+    dat_inst %>% select(co2, a_inst=a)
+  ) %>%
+  mutate(ratio = a_inst/a) %>% 
+  ggplot(aes(x=co2, y=a_inst/a))+
+  geom_line()
+
+  # ggplot(aes(x=co2))+
+  # geom_line(aes(y=a), col="green")+
+  # geom_line(aes(y=a_inst), col="yellow")
+```
+

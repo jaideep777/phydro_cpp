@@ -151,6 +151,13 @@ inline Rcpp::List rphydro_instantaneous_analytical(double vcmax25, double jmax25
 	return PHydroResult_to_List(phydro_instantaneous_analytical(vcmax25, jmax25, tc, tg, ppfd, netrad, vpd, co2, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant_cpp, par_cost_cpp, par_control));
 }
 
+inline Rcpp::List rphydro_instantaneous_analytical_given_dpsi(double dpsi, double vcmax25, double jmax25, double tc, double tg, double ppfd, double netrad, double vpd, double co2, double pa, double fapar, double kphio, double psi_soil, double rdark, double vwind, Rcpp::List par_plant, Rcpp::List par_cost, Rcpp::List options){
+	ParControl par_control = listToParControl(options);
+	ParPlant par_plant_cpp = listToParPlant(par_plant);
+	ParCost  par_cost_cpp(par_cost["alpha"], par_cost["gamma"]);
+
+	return PHydroResult_to_List(phydro_instantaneous_analytical_given_dpsi(dpsi, vcmax25, jmax25, tc, tg, ppfd, netrad, vpd, co2, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant_cpp, par_cost_cpp, par_control));
+}
 
 #ifndef PHYDRO_ANALYTICAL_ONLY
 
@@ -242,6 +249,7 @@ RCPP_MODULE(phydro_module) {
 	// Phydro core
 	function("rphydro_analytical", &rphydro_analytical);
 	function("rphydro_instantaneous_analytical", &rphydro_instantaneous_analytical);
+	function("rphydro_instantaneous_analytical_given_dpsi", &rphydro_instantaneous_analytical_given_dpsi);
 
 #ifndef PHYDRO_ANALYTICAL_ONLY
 	function("rphydro_numerical", &rphydro_numerical);
