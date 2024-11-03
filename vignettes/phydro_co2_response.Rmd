@@ -21,14 +21,14 @@ library(reshape2)
 
 ```{r}
 kphio = 0.0593;        # quantum yield efficiency
-ppfd = 300;          # umol/m2/s
-ppfd_max = 1200;
-vpd  = 600;         # Pa
+ppfd = 410.4675365;          # umol/m2/s
+ppfd_max = 1798.319161;
+vpd  = 652.7145833;         # Pa
 co2  = 368;          # ppm
 elv  = 0;            # m.a.s.l.
-fapar = 1-exp(-0.5*5.0);         # fraction
+fapar = 1-exp(-0.5*5.1);         # fraction
 rdark = 0.015;
-tc = 25;
+tc = 25.75380729;
 vwind = 3;
 netrad = ppfd/2
 psi_soil = -0.05
@@ -203,5 +203,25 @@ dat %>%
   # ggplot(aes(x=co2))+
   # geom_line(aes(y=a), col="green")+
   # geom_line(aes(y=a_inst), col="yellow")
+```
+
+
+### Light-saturated beta for 368.9 ppm vs 614.2 ppm
+
+```{r}
+dat_acc_amz = tibble(co2 = c(368.9, 614.2)) %>% mutate(dat = purrr::map(.x=co2, .f = ~rphydro_analytical(tc, tc, ppfd_max, netrad, vpd, .x, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options))) %>% unnest_wider(dat)
+  
+  
+dat_inst_amz = tibble(co2 =c(368.9, 614.2)) %>% left_join(dat_acc_amz %>% select(co2, vcmax25, jmax25)) %>% mutate(dat = purrr::pmap(.l=list(co2, vcmax25, jmax25), .f = ~rphydro_instantaneous_analytical(..2, ..3, tc, tc, 1500, netrad, vpd, ..1, pa, fapar, kphio, psi_soil, rdark, vwind, par_plant, par_cost, options))) %>% select(-vcmax25, -jmax25) %>% unnest_wider(dat) %>% mutate(a=a/2)
+
+df.m1.amz <- dat_inst_amz %>% melt("co2")
+
+dat_base1_amz = dat_inst_amz %>% filter(abs(co2-368) == min(abs(co2-368)) )
+
+dat_inst_amz %>% 
+  filter(co2 > 300) %>% 
+  mutate(beta_a = log(a/dat_base1_amz$a)/log(co2/dat_base1_amz$co2),
+         beta_vcmax = log(vcmax25/dat_base1_amz$vcmax25)/log(co2/dat_base1_amz$co2)
+         ) 
 ```
 
